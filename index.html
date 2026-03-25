@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PokéPrint — Deck PDF Generator</title>
+
+  <!-- pdf-lib: PDF generation fully in the browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ═══════════════════════════════════════════
+       DESIGN TOKENS
+    ═══════════════════════════════════════════ */
+    :root {
+      --bg:          #08080F;
+      --surface:     #0f0f1c;
+      --surface2:    #161628;
+      --surface3:    #1e1e38;
+      --border:      #252548;
+      --border-soft: #1a1a35;
+      --red:         #E3350D;
+      --red-glow:    rgba(227,53,13,0.25);
+      --red-soft:    rgba(227,53,13,0.10);
+      --yellow:      #FFCB05;
+      --yellow-glow: rgba(255,203,5,0.20);
+      --yellow-soft: rgba(255,203,5,0.08);
+      --text:        #dde0f5;
+      --text-dim:    #6868a0;
+      --text-muted:  #33335a;
+      --success:     #2ecc71;
+      --warn:        #f39c12;
+      --radius:      14px;
+      --radius-sm:   8px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+
+    /* Grid texture */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border-soft) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+      background-size: 48px 48px;
+      opacity: 0.5;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Pokeball orb decoration */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -200px;
+      right: -200px;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--red-soft) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 20px 100px;
+    }
+
+    /* ═══════════════════════════════════════════
+       HEADER
+    ═══════════════════════════════════════════ */
+    header {
+      text-align: center;
+      padding: 64px 0 48px;
+    }
+
+    .logo {
+      font-family: 'Bangers', cursive;
+      font-size: clamp(52px, 9vw, 88px);
+      letter-spacing: 6px;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--yellow) 10%, #ff8c00 50%, var(--red) 90%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      display: block;
+      filter: drop-shadow(0 0 30px var(--yellow-glow));
+    }
+
+    .tagline {
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .tagline strong {
+      color: var(--yellow);
+      font-weight: 600;
+    }
+
+    /* ═══════════════════════════════════════════
+       CARDS (UI panels)
+    ═══════════════════════════════════════════ */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 14px;
+    }
+
+    .card-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2.5px;
+      color: var(--text-dim);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-title .pip {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--yellow);
+      flex-shrink: 0;
+    }
+
+    /* ═══════════════════════════════════════════
+       LAYOUT
+    ═══════════════════════════════════════════ */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 620px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+
+    /* ═══════════════════════════════════════════
+       TEXTAREA
+    ═══════════════════════════════════════════ */
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: 'DM Mono', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      padding: 14px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    textarea:focus {
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 3px var(--yellow-soft);
+    }
+
+    textarea::placeholder { color: var(--text-muted); }
+
+    .textarea-hint {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ═══════════════════════════════════════════
+       DROPZONE
+    ═══════════════════════════════════════════ */
+    .dropzone {
+      position: relative;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-sm);
+      padding: 36px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--surface2);
+      min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .dropzone.drag-over { border-color: var(--yellow); background: var(--yellow-soft); }
+    .dropzone.has-file  { border-color: var(--success); border-style: solid; }
+    .dropzone.auto-loaded { border-color: var(--yellow); border-style: solid; }
+
+    .dropzone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .dropzone-icon { font-size: 36px; line-height: 1; }
+    .dropzone-text { font-size: 13px; color: var(--text-dim); }
+    .dropzone-sub  { font-size: 11px; color: var(--text-muted); }
+    .dropzone-name { font-size: 12px; color: var(--success); font-weight: 600; margin-top: 4px; }
+
+    /* ═══════════════════════════════════════════
+       FORM FIELDS
+    ═══════════════════════════════════════════ */
+    label.field-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 7px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 3px var(--yellow-soft);
+    }
+
+    .field-hint {
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .field-hint a { color: var(--yellow); text-decoration: none; }
+    .field-hint a:hover { text-decoration: underline; }
+
+    /* ═══════════════════════════════════════════
+       FORMAT SELECTOR
+    ═══════════════════════════════════════════ */
+    .format-group {
+      display: flex;
+      gap: 8px;
+    }
+
+    .fmt-btn {
+      flex: 1;
+      padding: 10px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      color: var(--text-dim);
+      cursor: pointer;
+      font-family: 'Outfit', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .fmt-btn:hover { border-color: var(--text-dim); }
+
+    .fmt-btn.active {
+      background: var(--yellow-soft);
+      border-color: var(--yellow);
+      color: var(--yellow);
+    }
+
+    /* ═══════════════════════════════════════════
+       GENERATE BUTTON
+    ═══════════════════════════════════════════ */
+    #btn-generate {
+      display: block;
+      width: 100%;
+      padding: 20px;
+      background: var(--red);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-family: 'Bangers', cursive;
+      font-size: 26px;
+      letter-spacing: 4px;
+      cursor: pointer;
+      margin-top: 6px;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #btn-generate::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    #btn-generate:hover:not(:disabled) {
+      background: #ff4520;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px var(--red-glow);
+    }
+
+    #btn-generate:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ═══════════════════════════════════════════
+       PROGRESS
+    ═══════════════════════════════════════════ */
+    #progress-section { display: none; }
+
+    .progress-track {
+      background: var(--surface2);
+      border-radius: 999px;
+      height: 5px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-fill {
+      background: linear-gradient(90deg, var(--yellow), var(--red));
+      height: 100%;
+      border-radius: 999px;
+      width: 0%;
+      transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .progress-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+
+    .log {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.7;
+      scrollbar-width: thin;
+    }
+
+    .log-line          { display: block; }
+    .log-line.ok       { color: var(--success); }
+    .log-line.warn     { color: var(--warn); }
+    .log-line.err      { color: var(--red); }
+    .log-line.dim      { color: var(--text-muted); }
+
+    /* ═══════════════════════════════════════════
+       RESULTS
+    ═══════════════════════════════════════════ */
+    #results-section { display: none; }
+
+    .stats-row {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .stat-item {
+      flex: 1;
+      text-align: center;
+      padding: 16px 8px;
+      border-right: 1px solid var(--border);
+    }
+
+    .stat-item:last-child { border-right: none; }
+
+    .stat-val {
+      font-family: 'Bangers', cursive;
+      font-size: 30px;
+      letter-spacing: 2px;
+      color: var(--yellow);
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .download-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 480px) {
+      .download-grid { grid-template-columns: 1fr; }
+    }
+
+    .download-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 18px 16px;
+      text-align: center;
+    }
+
+    .dl-type {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .dl-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 14px;
+      font-family: 'DM Mono', monospace;
+    }
+
+    .btn-dl {
+      display: inline-block;
+      padding: 9px 22px;
+      background: var(--yellow);
+      color: #000;
+      font-family: 'Outfit', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      transition: all 0.15s;
+      cursor: pointer;
+    }
+
+    .btn-dl:hover {
+      background: #ffe040;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px var(--yellow-glow);
+    }
+
+    .dl-size {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* Instructions */
+    .instructions {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px;
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.8;
+    }
+
+    .instructions strong { color: var(--text); }
+
+    .instr-step {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .instr-num {
+      font-family: 'Bangers', cursive;
+      font-size: 16px;
+      color: var(--yellow);
+      min-width: 20px;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 18px 0;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ══════════════════════════════════
+       HEADER
+  ══════════════════════════════════ -->
+  <header>
+    <span class="logo">PokéPrint</span>
+    <p class="tagline">Deck PDF Generator · <strong>Duplex Ready</strong> · 100% Browser</p>
+  </header>
+
+  <!-- ══════════════════════════════════
+       INPUT
+  ══════════════════════════════════ -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title"><span class="pip"></span>Lista del mazo</div>
+      <textarea id="deck-list" placeholder="4 Iron Crown ex TEF 81&#10;4 Munkidori TWM 95&#10;2 Fezandipiti ex TWM 92&#10;4 Bibarel BRS 121&#10;..."></textarea>
+      <p class="textarea-hint">Formato: <code style="color:var(--yellow)">CANTIDAD NOMBRE SET NÚMERO</code></p>
+    </div>
+    <div class="card">
+      <div class="card-title"><span class="pip"></span>Imagen del reverso</div>
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="back-file" accept="image/png,image/jpeg,image/webp">
+        <div class="dropzone-icon" id="dz-icon">⏳</div>
+        <div class="dropzone-text" id="dz-text">Cargando reverso oficial...</div>
+        <div class="dropzone-sub" id="dz-sub">Obteniendo de Bulbapedia...</div>
+        <div class="dropzone-name" id="dz-name"></div>
+      </div>
+      <p class="textarea-hint" style="margin-top:6px">Reverso oficial cargado automáticamente. Arrastra una imagen para usar uno personalizado.</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════
+       CONFIG
+  ══════════════════════════════════ -->
+  <div class="card">
+    <div class="card-title"><span class="pip"></span>Configuración</div>
+    <div class="two-col">
+      <div>
+        <label class="field-label" for="api-key">API Key de pokemontcg.io</label>
+        <input type="text" id="api-key" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        <p class="field-hint">
+          Opcional pero recomendado. Regístrate gratis en
+          <a href="https://dev.pokemontcg.io" target="_blank">dev.pokemontcg.io</a>
+          para mayor límite de requests.
+        </p>
+      </div>
+      <div>
+        <label class="field-label">Formato de hoja</label>
+        <div class="format-group">
+          <div class="fmt-btn active" data-fmt="A4">A4</div>
+          <div class="fmt-btn" data-fmt="Letter">Carta</div>
+          <div class="fmt-btn" data-fmt="both">Ambos</div>
+        </div>
+        <p class="field-hint" style="margin-top:10px">
+          Genera un PDF de impresión + uno de calibración por formato.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════
+       BUTTON
+  ══════════════════════════════════ -->
+  <button id="btn-generate">⚡ GENERAR PDFs</button>
+
+  <!-- ══════════════════════════════════
+       PROGRESS
+  ══════════════════════════════════ -->
+  <div id="progress-section" class="card" style="margin-top:14px">
+    <div class="card-title"><span class="pip"></span>Progreso</div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-label" id="progress-label">Iniciando...</div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <!-- ══════════════════════════════════
+       RESULTS
+  ══════════════════════════════════ -->
+  <div id="results-section" class="card" style="margin-top:14px">
+    <div class="card-title"><span class="pip"></span>Archivos generados</div>
+
+    <div class="stats-row" id="stats-row"></div>
+    <div class="download-grid" id="download-grid"></div>
+
+    <hr>
+
+    <div class="instructions">
+      <strong>Instrucciones de impresión:</strong>
+      <div style="margin-top:10px">
+        <div class="instr-step"><span class="instr-num">1</span><span>Imprime primero solo el PDF de <strong>calibración</strong>.</span></div>
+        <div class="instr-step"><span class="instr-num">2</span><span>Da vuelta ese papel en el eje <strong>LARGO</strong> (como abrir un libro).</span></div>
+        <div class="instr-step"><span class="instr-num">3</span><span>Imprime la hoja 2 del mazo sobre ese papel y verifica que los bordes coincidan.</span></div>
+        <div class="instr-step"><span class="instr-num">4</span><span>Impresión final: modo <strong>DÚPLEX / Doble cara</strong> · Voltear en: <strong>Eje largo (Flip on Long Edge)</strong>.</span></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+/* ════════════════════════════════════════════════════════════
+   CONSTANTS — identical units as the Python script
+   pdf-lib works in points: 1mm = 2.8346pt
+════════════════════════════════════════════════════════════ */
+const MM      = 2.8346;
+const CARD_W  = 63.5 * MM;   // 2.5 inches
+const CARD_H  = 88.9 * MM;   // 3.5 inches
+const CARD_GAP = 2   * MM;   // separation between cards
+const COLS = 3, ROWS = 3;
+const CARDS_PER_PAGE = COLS * ROWS;
+
+const PAGE_SIZES = {
+  A4:     [595.28, 841.89],
+  Letter: [612,    792],
+};
+
+/* ════════════════════════════════════════════════════════════
+   STATE
+════════════════════════════════════════════════════════════ */
+let backBytes    = null;       // Uint8Array — official or user-uploaded
+let selectedFormat = 'A4';    // 'A4' | 'Letter' | 'both'
+
+/* ════════════════════════════════════════════════════════════
+   AUTO-FETCH OFFICIAL CARD BACK
+   Source: Bulbapedia / Bulbagarden CDN (official English card back)
+════════════════════════════════════════════════════════════ */
+const OFFICIAL_BACK_URLS = [
+  'https://cdn2.bulbagarden.net/upload/1/17/Cardback.jpg',
+  'https://corsproxy.io/?url=https%3A%2F%2Fcdn2.bulbagarden.net%2Fupload%2F1%2F17%2FCardback.jpg',
+];
+
+async function fetchOfficialBack() {
+  for (const url of OFFICIAL_BACK_URLS) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return new Uint8Array(await res.arrayBuffer());
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+/* ════════════════════════════════════════════════════════════
+   PURE HELPERS
+════════════════════════════════════════════════════════════ */
+
+/** Parse list.md / text format → [{setCode, num}]  */
+function parseCardList(text) {
+  const cards = [];
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    const match = line.match(/^(\d+)\s+.+?\s+([A-Z]{2,5})\s+(\d+)\s*$/);
+    if (!match) continue;
+    const [, qty, setCode, num] = match;
+    for (let i = 0; i < +qty; i++) cards.push({ setCode, num: +num });
+  }
+  return cards;
+}
+
+/** Split array into pages of `size` */
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Returns the bottom-left (x,y) of a card slot in PDF coordinates.
+ * mirrored=true flips columns for duplex back pages.
+ */
+function cardSlotPosition(slotIdx, mirrored, pageW, pageH) {
+  const marginX = (pageW - COLS * CARD_W - (COLS - 1) * CARD_GAP) / 2;
+  const marginY = (pageH - ROWS * CARD_H - (ROWS - 1) * CARD_GAP) / 2;
+
+  const row = Math.floor(slotIdx / COLS);
+  let   col = slotIdx % COLS;
+  if (mirrored) col = COLS - 1 - col;
+
+  return {
+    x: marginX + col * (CARD_W + CARD_GAP),
+    y: marginY + (ROWS - 1 - row) * (CARD_H + CARD_GAP),
+    marginX,
+    marginY,
+  };
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+/* ════════════════════════════════════════════════════════════
+   UI HELPERS
+════════════════════════════════════════════════════════════ */
+const $log         = document.getElementById('log');
+const $fill        = document.getElementById('progress-fill');
+const $label       = document.getElementById('progress-label');
+
+function logLine(msg, type = '') {
+  const span = document.createElement('span');
+  span.className = 'log-line ' + type;
+  span.textContent = msg;
+  $log.appendChild(span);
+  $log.appendChild(document.createTextNode('\n'));
+  $log.scrollTop = $log.scrollHeight;
+}
+
+function setProgress(pct, label) {
+  $fill.style.width = Math.min(100, pct) + '%';
+  $label.textContent = label;
+}
+
+/* ════════════════════════════════════════════════════════════
+   POKEMON TCG API CLIENT
+════════════════════════════════════════════════════════════ */
+const apiUrlCache = new Map();   // "SET-num" → imageUrl | null
+
+async function resolveCardImageUrl(setCode, num, apiKey) {
+  const key = `${setCode}-${num}`;
+  if (apiUrlCache.has(key)) return apiUrlCache.get(key);
+
+  const headers = apiKey ? { 'X-Api-Key': apiKey } : {};
+  const query   = encodeURIComponent(`set.ptcgoCode:${setCode} number:${num}`);
+
+  try {
+    const res  = await fetch(`https://api.pokemontcg.io/v2/cards?q=${query}`, { headers });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const url  = json.data?.[0]?.images?.large ?? null;
+    apiUrlCache.set(key, url);
+    return url;
+  } catch {
+    apiUrlCache.set(key, null);
+    return null;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   IMAGE FETCHER (with CORS-proxy fallback)
+════════════════════════════════════════════════════════════ */
+async function fetchImageBytes(url) {
+  // Direct fetch first (pokemontcg.io CDN supports CORS)
+  try {
+    const res = await fetch(url);
+    if (res.ok) return new Uint8Array(await res.arrayBuffer());
+  } catch { /* fall through */ }
+
+  // Fallback: corsproxy.io
+  try {
+    const proxy = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+    const res   = await fetch(proxy);
+    if (res.ok) return new Uint8Array(await res.arrayBuffer());
+  } catch { /* fall through */ }
+
+  return null;
+}
+
+/* ════════════════════════════════════════════════════════════
+   PDF DRAWING PRIMITIVES
+════════════════════════════════════════════════════════════ */
+const { PDFDocument, rgb, StandardFonts } = PDFLib;
+
+function drawMissingCard(page, slotIdx, mirrored, pageW, pageH, setCode, num, font) {
+  const { x, y } = cardSlotPosition(slotIdx, mirrored, pageW, pageH);
+  page.drawRectangle({
+    x, y, width: CARD_W, height: CARD_H,
+    color: rgb(1, 0.94, 0.93),
+    borderColor: rgb(0.82, 0.12, 0.05),
+    borderWidth: 2,
+  });
+  page.drawText('IMAGEN NO ENCONTRADA', {
+    x: x + 6, y: y + CARD_H / 2 + 6,
+    size: 7, font,
+    color: rgb(0.72, 0.05, 0.02),
+  });
+  page.drawText(`${setCode} ${String(num).padStart(3, '0')}`, {
+    x: x + 6, y: y + CARD_H / 2 - 9,
+    size: 7, font,
+    color: rgb(0.5, 0.05, 0.02),
+  });
+}
+
+function drawPageLabel(page, text, pageW, pageH, font) {
+  const marginX = (pageW - COLS * CARD_W - (COLS - 1) * CARD_GAP) / 2;
+  const marginY = (pageH - ROWS * CARD_H - (ROWS - 1) * CARD_GAP) / 2;
+  page.drawText(text, {
+    x: marginX,
+    y: marginY - 13,
+    size: 6.5,
+    font,
+    color: rgb(0.55, 0.55, 0.6),
+  });
+}
+
+/**
+ * Draws a calibration card slot:
+ * light gray fill + diagonal hatching + bold border + upward arrow + label
+ */
+function drawCalibrationCard(page, slotIdx, mirrored, pageW, pageH, font) {
+  const { x, y } = cardSlotPosition(slotIdx, mirrored, pageW, pageH);
+  const cx = x + CARD_W / 2;
+  const cy = y + CARD_H / 2;
+
+  // Background
+  page.drawRectangle({ x, y, width: CARD_W, height: CARD_H, color: rgb(0.97, 0.97, 0.97) });
+
+  // Diagonal hatching lines (45° — contained within card bounds)
+  const spacing = 5 * MM;
+  const totalDiag = CARD_W + CARD_H;
+  const steps = Math.ceil(totalDiag / spacing) + 2;
+  for (let i = -Math.ceil(CARD_H / spacing) - 1; i < steps; i++) {
+    // Raw diagonal endpoints
+    let x1 = x + i * spacing, y1 = y;
+    let x2 = x1 + CARD_H,     y2 = y + CARD_H;
+
+    // Cohen-Sutherland clip to card rectangle
+    const clipped = clipLineToRect(x1, y1, x2, y2, x, y, x + CARD_W, y + CARD_H);
+    if (!clipped) continue;
+    const [cx1, cy1, cx2, cy2] = clipped;
+
+    page.drawLine({
+      start: { x: cx1, y: cy1 },
+      end:   { x: cx2, y: cy2 },
+      thickness: 0.4,
+      color: rgb(0.76, 0.76, 0.76),
+    });
+  }
+
+  // Border
+  page.drawRectangle({
+    x, y, width: CARD_W, height: CARD_H,
+    borderColor: rgb(0, 0, 0),
+    borderWidth: 2,
+  });
+
+  // Upward arrow via SVG path
+  // pdf-lib drawSvgPath: SVG coords (Y down) map to PDF (Y up)
+  // So SVG (0, -h) → h units ABOVE the origin in PDF space
+  const aW = 10 * MM, aH = 14 * MM, sW = 3.5 * MM, sH = 8 * MM;
+  const arrowPath = [
+    `M 0 ${-(aH / 2)}`,            // tip (above in PDF)
+    `L ${-(aW / 2)} 0`,            // base left
+    `L ${aW / 2} 0`,               // base right
+    `Z`,
+    `M ${-(sW / 2)} 0`,            // stem top-left
+    `L ${-(sW / 2)} ${sH}`,        // stem bottom-left (below in PDF)
+    `L ${sW / 2} ${sH}`,
+    `L ${sW / 2} 0`,
+    `Z`,
+  ].join(' ');
+
+  // Offset origin so arrow+stem is centered: arrow above, stem below origin midpoint
+  const arrowOriginY = cy + (sH / 2) - (aH / 4);
+  page.drawSvgPath(arrowPath, {
+    x: cx,
+    y: arrowOriginY,
+    color: rgb(0.08, 0.08, 0.08),
+  });
+
+  // Bottom label
+  page.drawText('CALIBRACION  -  esta flecha debe apuntar ARRIBA al recortar', {
+    x: x + 4,
+    y: y + 5,
+    size: 5,
+    font,
+    color: rgb(0.35, 0.35, 0.35),
+  });
+}
+
+/**
+ * Liang-Barsky / Cohen-Sutherland style line clip to [xMin,xMax] × [yMin,yMax].
+ * Returns [x1,y1,x2,y2] clipped or null if fully outside.
+ */
+function clipLineToRect(x1, y1, x2, y2, xMin, yMin, xMax, yMax) {
+  const dx = x2 - x1, dy = y2 - y1;
+  let tMin = 0, tMax = 1;
+
+  function clip(p, q) {
+    if (p === 0) return q >= 0;   // parallel
+    const t = q / p;
+    if (p < 0) { if (t > tMax) return false; if (t > tMin) tMin = t; }
+    else        { if (t < tMin) return false; if (t < tMax) tMax = t; }
+    return true;
+  }
+
+  if (!clip(-dx, x1 - xMin)) return null;
+  if (!clip( dx, xMax - x1)) return null;
+  if (!clip(-dy, y1 - yMin)) return null;
+  if (!clip( dy, yMax - y1)) return null;
+
+  return [
+    x1 + tMin * dx, y1 + tMin * dy,
+    x1 + tMax * dx, y1 + tMax * dy,
+  ];
+}
+
+/* ════════════════════════════════════════════════════════════
+   PDF GENERATORS
+════════════════════════════════════════════════════════════ */
+
+/**
+ * Generates the print deck PDF (front + mirrored back pages).
+ * The last back page has exactly the same card count as the last front page.
+ */
+async function buildPrintPDF(sizeName, resolvedCards, backBytes) {
+  const [pageW, pageH] = PAGE_SIZES[sizeName];
+  const pdfDoc   = await PDFDocument.create();
+  const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  // Embed the BACK image once and reuse
+  const backImage = await embedImageSafe(pdfDoc, backBytes, 'back');
+  if (!backImage) throw new Error('No se pudo procesar la imagen del reverso.');
+
+  // Deduplicate: embed each unique card image only once
+  const imageCache = new Map();   // imageUrl → embedded image | null
+  for (const card of resolvedCards) {
+    if (!card.imageUrl || imageCache.has(card.imageUrl)) continue;
+    const bytes    = await fetchImageBytes(card.imageUrl);
+    const embedded = await embedImageSafe(pdfDoc, bytes, card.imageUrl);
+    imageCache.set(card.imageUrl, embedded);
+  }
+
+  const pages = chunkArray(resolvedCards, CARDS_PER_PAGE);
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const pageCards = pages[pi];
+
+    // ── FRONT ──────────────────────────────────────
+    const frontPage = pdfDoc.addPage([pageW, pageH]);
+    for (let si = 0; si < pageCards.length; si++) {
+      const { setCode, num, imageUrl } = pageCards[si];
+      const { x, y } = cardSlotPosition(si, false, pageW, pageH);
+      const img = imageUrl ? imageCache.get(imageUrl) : null;
+      if (img) {
+        frontPage.drawImage(img, { x, y, width: CARD_W, height: CARD_H });
+      } else {
+        drawMissingCard(frontPage, si, false, pageW, pageH, setCode, num, font);
+      }
+    }
+    drawPageLabel(frontPage, `FRENTE - hoja ${pi + 1} de ${pages.length}`, pageW, pageH, font);
+
+    // ── BACK (mirrored, same slot count as front) ──
+    const backPage = pdfDoc.addPage([pageW, pageH]);
+    for (let si = 0; si < pageCards.length; si++) {   // ← pageCards.length, NOT 9
+      const { x, y } = cardSlotPosition(si, true, pageW, pageH);
+      backPage.drawImage(backImage, { x, y, width: CARD_W, height: CARD_H });
+    }
+    drawPageLabel(
+      backPage,
+      `REVERSO - hoja ${pi + 1} (${pageCards.length} cartas, espejado duplex eje largo)`,
+      pageW, pageH, font,
+    );
+  }
+
+  return pdfDoc.save();
+}
+
+/** Generates a single-page calibration PDF (9 slots, no cards needed). */
+async function buildCalibrationPDF(sizeName) {
+  const [pageW, pageH] = PAGE_SIZES[sizeName];
+  const pdfDoc = await PDFDocument.create();
+  const font   = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const page   = pdfDoc.addPage([pageW, pageH]);
+
+  for (let si = 0; si < CARDS_PER_PAGE; si++) {
+    drawCalibrationCard(page, si, false, pageW, pageH, font);
+  }
+
+  drawPageLabel(page, 'CALIBRACION - imprime primero para verificar alineacion de corte', pageW, pageH, font);
+  return pdfDoc.save();
+}
+
+/** Tries PNG then JPEG embed. Returns null on failure. */
+async function embedImageSafe(pdfDoc, bytes, label) {
+  if (!bytes) return null;
+  try { return await pdfDoc.embedPng(bytes); } catch {}
+  try { return await pdfDoc.embedJpg(bytes); } catch {}
+  console.warn('Could not embed image:', label);
+  return null;
+}
+
+/* ════════════════════════════════════════════════════════════
+   DOWNLOAD HELPER
+════════════════════════════════════════════════════════════ */
+function createDownloadUrl(bytes, filename) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  return URL.createObjectURL(blob);
+}
+
+function addDownloadCard(grid, typeLabel, filename, url, sizeBytes) {
+  const div = document.createElement('div');
+  div.className = 'download-card';
+  div.innerHTML = `
+    <div class="dl-type">${typeLabel}</div>
+    <div class="dl-name">${filename}</div>
+    <a class="btn-dl" href="${url}" download="${filename}">⬇ Descargar</a>
+    <div class="dl-size">${formatBytes(sizeBytes)}</div>
+  `;
+  grid.appendChild(div);
+}
+
+/* ════════════════════════════════════════════════════════════
+   MAIN GENERATE FUNCTION
+════════════════════════════════════════════════════════════ */
+async function generate() {
+  const deckText = document.getElementById('deck-list').value.trim();
+  const apiKey   = document.getElementById('api-key').value.trim();
+
+  if (!deckText)  return alert('Pega tu lista de cartas.');
+  if (!backBytes) return alert('La imagen del reverso no está lista aún. Espera un momento o sube una manualmente.');
+
+  // Reset UI
+  document.getElementById('progress-section').style.display = 'block';
+  document.getElementById('results-section').style.display  = 'none';
+  document.getElementById('download-grid').innerHTML = '';
+  document.getElementById('stats-row').innerHTML    = '';
+  $log.innerHTML = '';
+  document.getElementById('btn-generate').disabled = true;
+
+  try {
+    /* ── STEP 1: Parse ── */
+    setProgress(2, 'Analizando lista...');
+    const cards = parseCardList(deckText);
+    if (cards.length === 0) throw new Error('No se encontraron cartas en el formato esperado.');
+    logLine(`✓ ${cards.length} cartas en el mazo`, 'ok');
+
+    /* ── STEP 2: Back image (already loaded) ── */
+    logLine(`✓ Reverso listo (${formatBytes(backBytes.length)})`, 'ok');
+
+    /* ── STEP 3: Resolve image URLs (deduped API calls) ── */
+    const uniqueKeys = [...new Set(cards.map(c => `${c.setCode}-${c.num}`))];
+    logLine(`→ ${uniqueKeys.length} cartas únicas — consultando API...`);
+
+    const urlMap = new Map();
+    for (let i = 0; i < uniqueKeys.length; i++) {
+      const [setCode, numStr] = uniqueKeys[i].split('-');
+      setProgress(2 + (i / uniqueKeys.length) * 38, `Buscando ${setCode} ${numStr} (${i + 1}/${uniqueKeys.length})...`);
+
+      const url = await resolveCardImageUrl(setCode, +numStr, apiKey);
+      urlMap.set(uniqueKeys[i], url);
+      logLine(
+        url
+          ? `  ✓ ${setCode} ${String(numStr).padStart(3,'0')} encontrada`
+          : `  ⚠ ${setCode} ${String(numStr).padStart(3,'0')} no encontrada`,
+        url ? 'ok' : 'warn',
+      );
+
+      // Rate-limit courtesy delay when no API key (1 req every 100ms per batch)
+      if (!apiKey && (i + 1) % 5 === 0) await sleep(500);
+    }
+
+    /* ── STEP 4: Attach URLs to card list ── */
+    const resolvedCards = cards.map(c => ({
+      ...c,
+      imageUrl: urlMap.get(`${c.setCode}-${c.num}`) ?? null,
+    }));
+
+    const foundCount   = resolvedCards.filter(c => c.imageUrl).length;
+    const missingCount = resolvedCards.length - foundCount;
+    logLine(`→ ${foundCount} con imagen, ${missingCount} sin imagen`);
+
+    /* ── STEP 5: Build PDFs ── */
+    const formats    = selectedFormat === 'both' ? ['A4', 'Letter'] : [selectedFormat];
+    const pdfResults = [];
+
+    for (let fi = 0; fi < formats.length; fi++) {
+      const sizeName = formats[fi];
+      const baseProgress = 40 + fi * (55 / formats.length);
+
+      setProgress(baseProgress, `Generando print_deck_${sizeName}.pdf...`);
+      logLine(`→ Generando print_deck_${sizeName}.pdf...`);
+      const printBytes = await buildPrintPDF(sizeName, resolvedCards, backBytes);
+      logLine(`  ✓ print_deck_${sizeName}.pdf (${formatBytes(printBytes.length)})`, 'ok');
+
+      setProgress(baseProgress + 20 / formats.length, `Generando calibracion_${sizeName}.pdf...`);
+      logLine(`→ Generando calibracion_${sizeName}.pdf...`);
+      const calBytes = await buildCalibrationPDF(sizeName);
+      logLine(`  ✓ calibracion_${sizeName}.pdf (${formatBytes(calBytes.length)})`, 'ok');
+
+      pdfResults.push({ sizeName, printBytes, calBytes });
+    }
+
+    setProgress(100, '✓ Listo — descarga tus PDFs abajo');
+    logLine('✓ Todo generado correctamente.', 'ok');
+
+    /* ── STEP 6: Render results ── */
+    const totalPagePairs = chunkArray(resolvedCards, CARDS_PER_PAGE).length;
+    const statsRow = document.getElementById('stats-row');
+    const statsData = [
+      { val: resolvedCards.length, label: 'Cartas' },
+      { val: totalPagePairs,       label: 'Hojas' },
+      { val: missingCount,         label: 'Faltantes' },
+      { val: pdfResults.length * 2, label: 'PDFs' },
+    ];
+    statsData.forEach(({ val, label }) => {
+      const div = document.createElement('div');
+      div.className = 'stat-item';
+      div.innerHTML = `<div class="stat-val">${val}</div><div class="stat-label">${label}</div>`;
+      statsRow.appendChild(div);
+    });
+
+    const grid = document.getElementById('download-grid');
+    for (const { sizeName, printBytes, calBytes } of pdfResults) {
+      addDownloadCard(grid, `Impresión · ${sizeName}`, `print_deck_${sizeName}.pdf`,
+        createDownloadUrl(printBytes, `print_deck_${sizeName}.pdf`), printBytes.length);
+      addDownloadCard(grid, `Calibración · ${sizeName}`, `calibracion_${sizeName}.pdf`,
+        createDownloadUrl(calBytes, `calibracion_${sizeName}.pdf`), calBytes.length);
+    }
+
+    document.getElementById('results-section').style.display = 'block';
+    document.getElementById('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  } catch (err) {
+    logLine(`ERROR: ${err.message}`, 'err');
+    setProgress(0, 'Error — revisa el log arriba');
+    console.error(err);
+  } finally {
+    document.getElementById('btn-generate').disabled = false;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   UI WIRING
+════════════════════════════════════════════════════════════ */
+
+// Format selector
+document.querySelectorAll('.fmt-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedFormat = btn.dataset.fmt;
+  });
+});
+
+// BACK file: input change
+document.getElementById('back-file').addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (f) readBackFile(f);
+});
+
+// BACK file: drag & drop
+const dropzone = document.getElementById('dropzone');
+dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', ()  => dropzone.classList.remove('drag-over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag-over');
+  const f = e.dataTransfer?.files?.[0];
+  if (f) readBackFile(f);
+});
+
+async function readBackFile(file) {
+  backBytes = new Uint8Array(await file.arrayBuffer());
+  dropzone.classList.add('has-file');
+  document.getElementById('dz-icon').textContent = '✅';
+  document.getElementById('dz-text').textContent = 'Reverso personalizado cargado';
+  document.getElementById('dz-sub').textContent  = '';
+  document.getElementById('dz-name').textContent = file.name;
+}
+
+// Auto-fetch official back image on page load
+(async () => {
+  const bytes = await fetchOfficialBack();
+  if (bytes) {
+    backBytes = bytes;
+    document.getElementById('dz-icon').textContent = '✅';
+    document.getElementById('dz-text').textContent = 'Reverso oficial cargado';
+    document.getElementById('dz-sub').textContent  = 'Bulbapedia · Cardback.jpg';
+    dropzone.classList.add('has-file');
+  } else {
+    document.getElementById('dz-icon').textContent = '🃏';
+    document.getElementById('dz-text').textContent = 'No se pudo cargar automáticamente';
+    document.getElementById('dz-sub').textContent  = 'Sube tu propia imagen de reverso';
+  }
+})();
+
+// Generate button
+document.getElementById('btn-generate').addEventListener('click', generate);
+
+// Persist API key in localStorage
+const savedKey = localStorage.getItem('ptcg_api_key') || '';
+if (savedKey) document.getElementById('api-key').value = savedKey;
+document.getElementById('api-key').addEventListener('input', e => {
+  localStorage.setItem('ptcg_api_key', e.target.value.trim());
+});
+</script>
+</body>
+</html>
