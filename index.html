@@ -644,22 +644,13 @@ const PAGE_SIZES = {
 let selectedFormat = 'A4';    // 'A4' | 'Letter' | 'both'
 
 /* ════════════════════════════════════════════════════════════
-   OFFICIAL CARD BACK — fetched on demand at generate time
-   Source: Bulbapedia / Bulbagarden CDN
+   OFFICIAL CARD BACK — cargado desde BACK.png local
+   Coloca BACK.png en el mismo directorio que index.html
 ════════════════════════════════════════════════════════════ */
-const OFFICIAL_BACK_URLS = [
-  'https://cdn2.bulbagarden.net/upload/1/17/Cardback.jpg',
-  'https://corsproxy.io/?url=https%3A%2F%2Fcdn2.bulbagarden.net%2Fupload%2F1%2F17%2FCardback.jpg',
-];
-
 async function fetchOfficialBack() {
-  for (const url of OFFICIAL_BACK_URLS) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return new Uint8Array(await res.arrayBuffer());
-    } catch { /* try next */ }
-  }
-  return null;
+  const res = await fetch('./BACK.png');
+  if (!res.ok) throw new Error(`No se encontró BACK.png (${res.status}). Colócalo junto a index.html.`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 /* ════════════════════════════════════════════════════════════
