@@ -545,23 +545,10 @@
   <!-- ══════════════════════════════════
        INPUT
   ══════════════════════════════════ -->
-  <div class="two-col">
-    <div class="card">
-      <div class="card-title"><span class="pip"></span>Lista del mazo</div>
-      <textarea id="deck-list" placeholder="4 Iron Crown ex TEF 81&#10;4 Munkidori TWM 95&#10;2 Fezandipiti ex TWM 92&#10;4 Bibarel BRS 121&#10;..."></textarea>
-      <p class="textarea-hint">Formato: <code style="color:var(--yellow)">CANTIDAD NOMBRE SET NÚMERO</code></p>
-    </div>
-    <div class="card">
-      <div class="card-title"><span class="pip"></span>Imagen del reverso</div>
-      <div class="dropzone" id="dropzone">
-        <input type="file" id="back-file" accept="image/png,image/jpeg,image/webp">
-        <div class="dropzone-icon" id="dz-icon">⏳</div>
-        <div class="dropzone-text" id="dz-text">Cargando reverso oficial...</div>
-        <div class="dropzone-sub" id="dz-sub">Obteniendo de Bulbapedia...</div>
-        <div class="dropzone-name" id="dz-name"></div>
-      </div>
-      <p class="textarea-hint" style="margin-top:6px">Reverso oficial cargado automáticamente. Arrastra una imagen para usar uno personalizado.</p>
-    </div>
+  <div class="card">
+    <div class="card-title"><span class="pip"></span>Lista del mazo</div>
+    <textarea id="deck-list" placeholder="4 Iron Crown ex TEF 81&#10;4 Munkidori TWM 95&#10;2 Fezandipiti ex TWM 92&#10;4 Bibarel BRS 121&#10;..."></textarea>
+    <p class="textarea-hint">Formato: <code style="color:var(--yellow)">CANTIDAD NOMBRE SET NÚMERO</code></p>
   </div>
 
   <!-- ══════════════════════════════════
@@ -654,12 +641,11 @@ const PAGE_SIZES = {
 /* ════════════════════════════════════════════════════════════
    STATE
 ════════════════════════════════════════════════════════════ */
-let backBytes    = null;       // Uint8Array — official or user-uploaded
 let selectedFormat = 'A4';    // 'A4' | 'Letter' | 'both'
 
 /* ════════════════════════════════════════════════════════════
-   AUTO-FETCH OFFICIAL CARD BACK
-   Source: Bulbapedia / Bulbagarden CDN (official English card back)
+   OFFICIAL CARD BACK — fetched on demand at generate time
+   Source: Bulbapedia / Bulbagarden CDN
 ════════════════════════════════════════════════════════════ */
 const OFFICIAL_BACK_URLS = [
   'https://cdn2.bulbagarden.net/upload/1/17/Cardback.jpg',
@@ -1045,8 +1031,7 @@ async function generate() {
   const deckText = document.getElementById('deck-list').value.trim();
   const apiKey   = document.getElementById('api-key').value.trim();
 
-  if (!deckText)  return alert('Pega tu lista de cartas.');
-  if (!backBytes) return alert('La imagen del reverso no está lista aún. Espera un momento o sube una manualmente.');
+  if (!deckText) return alert('Pega tu lista de cartas.');
 
   // Reset UI
   document.getElementById('progress-section').style.display = 'block';
@@ -1063,8 +1048,12 @@ async function generate() {
     if (cards.length === 0) throw new Error('No se encontraron cartas en el formato esperado.');
     logLine(`✓ ${cards.length} cartas en el mazo`, 'ok');
 
-    /* ── STEP 2: Back image (already loaded) ── */
-    logLine(`✓ Reverso listo (${formatBytes(backBytes.length)})`, 'ok');
+    /* ── STEP 2: Fetch back image on demand ── */
+    setProgress(5, 'Descargando imagen del reverso...');
+    logLine('→ Descargando reverso oficial (Bulbapedia)...');
+    const backBytes = await fetchOfficialBack();
+    if (!backBytes) throw new Error('No se pudo descargar la imagen del reverso. Revisa tu conexión.');
+    logLine(`✓ Reverso descargado (${formatBytes(backBytes.length)})`, 'ok');
 
     /* ── STEP 3: Resolve image URLs (deduped API calls) ── */
     const uniqueKeys = [...new Set(cards.map(c => `${c.setCode}-${c.num}`))];
@@ -1170,48 +1159,6 @@ document.querySelectorAll('.fmt-btn').forEach(btn => {
     selectedFormat = btn.dataset.fmt;
   });
 });
-
-// BACK file: input change
-document.getElementById('back-file').addEventListener('change', e => {
-  const f = e.target.files?.[0];
-  if (f) readBackFile(f);
-});
-
-// BACK file: drag & drop
-const dropzone = document.getElementById('dropzone');
-dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-dropzone.addEventListener('dragleave', ()  => dropzone.classList.remove('drag-over'));
-dropzone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropzone.classList.remove('drag-over');
-  const f = e.dataTransfer?.files?.[0];
-  if (f) readBackFile(f);
-});
-
-async function readBackFile(file) {
-  backBytes = new Uint8Array(await file.arrayBuffer());
-  dropzone.classList.add('has-file');
-  document.getElementById('dz-icon').textContent = '✅';
-  document.getElementById('dz-text').textContent = 'Reverso personalizado cargado';
-  document.getElementById('dz-sub').textContent  = '';
-  document.getElementById('dz-name').textContent = file.name;
-}
-
-// Auto-fetch official back image on page load
-(async () => {
-  const bytes = await fetchOfficialBack();
-  if (bytes) {
-    backBytes = bytes;
-    document.getElementById('dz-icon').textContent = '✅';
-    document.getElementById('dz-text').textContent = 'Reverso oficial cargado';
-    document.getElementById('dz-sub').textContent  = 'Bulbapedia · Cardback.jpg';
-    dropzone.classList.add('has-file');
-  } else {
-    document.getElementById('dz-icon').textContent = '🃏';
-    document.getElementById('dz-text').textContent = 'No se pudo cargar automáticamente';
-    document.getElementById('dz-sub').textContent  = 'Sube tu propia imagen de reverso';
-  }
-})();
 
 // Generate button
 document.getElementById('btn-generate').addEventListener('click', generate);
