@@ -727,17 +727,30 @@ function setProgress(pct, label) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   POKEMON TCG API CLIENT
+   IMAGE SOURCE — Limitless TCG CDN (primario) + pokemontcg.io (fallback)
 ════════════════════════════════════════════════════════════ */
-const apiUrlCache = new Map();   // "SET-num" → imageUrl | null
 
-async function resolveCardImageUrl(setCode, num, apiKey) {
+/**
+ * Construye la URL de imagen de Limitless TCG CDN.
+ * Funciona para el 95% de las cartas sin ninguna llamada a API.
+ * Patrón: {SET}/{SET}_{NUM_3D}_R_EN_MD.png
+ * R = arte regular | EN = inglés | MD = resolución media
+ */
+function limitlessUrl(setCode, num) {
+  const n = String(num).padStart(3, '0');
+  return `https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci/${setCode}/${setCode}_${n}_R_EN_MD.png`;
+}
+
+/**
+ * Fallback: pokemontcg.io API → URL de imagen grande.
+ */
+const apiUrlCache = new Map();
+async function resolveFromPokemontcgApi(setCode, num, apiKey) {
   const key = `${setCode}-${num}`;
   if (apiUrlCache.has(key)) return apiUrlCache.get(key);
 
   const headers = apiKey ? { 'X-Api-Key': apiKey } : {};
   const query   = encodeURIComponent(`set.ptcgoCode:${setCode} number:${num}`);
-
   try {
     const res  = await fetch(`https://api.pokemontcg.io/v2/cards?q=${query}`, { headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -751,22 +764,41 @@ async function resolveCardImageUrl(setCode, num, apiKey) {
   }
 }
 
-/* ════════════════════════════════════════════════════════════
-   IMAGE FETCHER (with CORS-proxy fallback)
-════════════════════════════════════════════════════════════ */
-async function fetchImageBytes(url) {
-  // Direct fetch first (pokemontcg.io CDN supports CORS)
+/**
+ * Descarga bytes de imagen probando en orden:
+ *  1. Limitless CDN (directo, sin API, sin rate limits)
+ *  2. Limitless CDN vía corsproxy.io (por si hay CORS)
+ *  3. pokemontcg.io API → URL → directo
+ *  4. pokemontcg.io URL vía corsproxy.io
+ */
+async function fetchCardImageBytes(setCode, num, apiKey) {
+  // ── 1. Limitless directo ───────────────────────────────────
+  const lUrl = limitlessUrl(setCode, num);
   try {
-    const res = await fetch(url);
+    const res = await fetch(lUrl);
     if (res.ok) return new Uint8Array(await res.arrayBuffer());
-  } catch { /* fall through */ }
+  } catch { /* sigue */ }
 
-  // Fallback: corsproxy.io
+  // ── 2. Limitless vía proxy ─────────────────────────────────
   try {
-    const proxy = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
-    const res   = await fetch(proxy);
+    const res = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(lUrl)}`);
     if (res.ok) return new Uint8Array(await res.arrayBuffer());
-  } catch { /* fall through */ }
+  } catch { /* sigue */ }
+
+  // ── 3. pokemontcg.io API ───────────────────────────────────
+  const apiUrl = await resolveFromPokemontcgApi(setCode, num, apiKey);
+  if (apiUrl) {
+    try {
+      const res = await fetch(apiUrl);
+      if (res.ok) return new Uint8Array(await res.arrayBuffer());
+    } catch { /* sigue */ }
+
+    // ── 4. pokemontcg.io vía proxy ─────────────────────────
+    try {
+      const res = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(apiUrl)}`);
+      if (res.ok) return new Uint8Array(await res.arrayBuffer());
+    } catch { /* sigue */ }
+  }
 
   return null;
 }
@@ -918,7 +950,7 @@ function clipLineToRect(x1, y1, x2, y2, xMin, yMin, xMax, yMax) {
  * Generates the print deck PDF (front + mirrored back pages).
  * The last back page has exactly the same card count as the last front page.
  */
-async function buildPrintPDF(sizeName, resolvedCards, backBytes) {
+async function buildPrintPDF(sizeName, cards, bytesMap, backBytes) {
   const [pageW, pageH] = PAGE_SIZES[sizeName];
   const pdfDoc   = await PDFDocument.create();
   const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -928,15 +960,16 @@ async function buildPrintPDF(sizeName, resolvedCards, backBytes) {
   if (!backImage) throw new Error('No se pudo procesar la imagen del reverso.');
 
   // Deduplicate: embed each unique card image only once
-  const imageCache = new Map();   // imageUrl → embedded image | null
-  for (const card of resolvedCards) {
-    if (!card.imageUrl || imageCache.has(card.imageUrl)) continue;
-    const bytes    = await fetchImageBytes(card.imageUrl);
-    const embedded = await embedImageSafe(pdfDoc, bytes, card.imageUrl);
-    imageCache.set(card.imageUrl, embedded);
+  const imageCache = new Map();   // "SET-num" → embedded image | null
+  for (const card of cards) {
+    const key = `${card.setCode}-${card.num}`;
+    if (imageCache.has(key)) continue;
+    const bytes    = bytesMap.get(key) ?? null;
+    const embedded = await embedImageSafe(pdfDoc, bytes, key);
+    imageCache.set(key, embedded);
   }
 
-  const pages = chunkArray(resolvedCards, CARDS_PER_PAGE);
+  const pages = chunkArray(cards, CARDS_PER_PAGE);
 
   for (let pi = 0; pi < pages.length; pi++) {
     const pageCards = pages[pi];
@@ -944,9 +977,9 @@ async function buildPrintPDF(sizeName, resolvedCards, backBytes) {
     // ── FRONT ──────────────────────────────────────
     const frontPage = pdfDoc.addPage([pageW, pageH]);
     for (let si = 0; si < pageCards.length; si++) {
-      const { setCode, num, imageUrl } = pageCards[si];
+      const { setCode, num } = pageCards[si];
       const { x, y } = cardSlotPosition(si, false, pageW, pageH);
-      const img = imageUrl ? imageCache.get(imageUrl) : null;
+      const img = imageCache.get(`${setCode}-${num}`);
       if (img) {
         frontPage.drawImage(img, { x, y, width: CARD_W, height: CARD_H });
       } else {
@@ -1046,52 +1079,46 @@ async function generate() {
     if (!backBytes) throw new Error('No se pudo descargar la imagen del reverso. Revisa tu conexión.');
     logLine(`✓ Reverso descargado (${formatBytes(backBytes.length)})`, 'ok');
 
-    /* ── STEP 3: Resolve image URLs (deduped API calls) ── */
+    /* ── STEP 3: Descargar imágenes (Limitless CDN primero, pokemontcg fallback) ── */
     const uniqueKeys = [...new Set(cards.map(c => `${c.setCode}-${c.num}`))];
-    logLine(`→ ${uniqueKeys.length} cartas únicas — consultando API...`);
+    logLine(`→ ${uniqueKeys.length} cartas únicas — descargando imágenes...`);
 
-    const urlMap = new Map();
+    const bytesMap = new Map();   // "SET-num" → Uint8Array | null
+    let foundCount = 0;
+
     for (let i = 0; i < uniqueKeys.length; i++) {
       const [setCode, numStr] = uniqueKeys[i].split('-');
-      setProgress(2 + (i / uniqueKeys.length) * 38, `Buscando ${setCode} ${numStr} (${i + 1}/${uniqueKeys.length})...`);
+      const num = +numStr;
+      setProgress(5 + (i / uniqueKeys.length) * 55, `${setCode} ${String(num).padStart(3,'0')} (${i + 1}/${uniqueKeys.length})...`);
 
-      const url = await resolveCardImageUrl(setCode, +numStr, apiKey);
-      urlMap.set(uniqueKeys[i], url);
-      logLine(
-        url
-          ? `  ✓ ${setCode} ${String(numStr).padStart(3,'0')} encontrada`
-          : `  ⚠ ${setCode} ${String(numStr).padStart(3,'0')} no encontrada`,
-        url ? 'ok' : 'warn',
-      );
+      const bytes = await fetchCardImageBytes(setCode, num, apiKey);
+      bytesMap.set(uniqueKeys[i], bytes);
 
-      // Rate-limit courtesy delay when no API key (1 req every 100ms per batch)
-      if (!apiKey && (i + 1) % 5 === 0) await sleep(500);
+      if (bytes) {
+        foundCount++;
+        logLine(`  ✓ ${setCode} ${String(num).padStart(3,'0')}`, 'ok');
+      } else {
+        logLine(`  ⚠ ${setCode} ${String(num).padStart(3,'0')} no encontrada`, 'warn');
+      }
     }
 
-    /* ── STEP 4: Attach URLs to card list ── */
-    const resolvedCards = cards.map(c => ({
-      ...c,
-      imageUrl: urlMap.get(`${c.setCode}-${c.num}`) ?? null,
-    }));
+    const missingCount = uniqueKeys.length - foundCount;
+    logLine(`→ ${foundCount} descargadas, ${missingCount} no encontradas`);
 
-    const foundCount   = resolvedCards.filter(c => c.imageUrl).length;
-    const missingCount = resolvedCards.length - foundCount;
-    logLine(`→ ${foundCount} con imagen, ${missingCount} sin imagen`);
-
-    /* ── STEP 5: Build PDFs ── */
+    /* ── STEP 4: Build PDFs ── */
     const formats    = selectedFormat === 'both' ? ['A4', 'Letter'] : [selectedFormat];
     const pdfResults = [];
 
     for (let fi = 0; fi < formats.length; fi++) {
       const sizeName = formats[fi];
-      const baseProgress = 40 + fi * (55 / formats.length);
+      const baseProgress = 60 + fi * (35 / formats.length);
 
       setProgress(baseProgress, `Generando print_deck_${sizeName}.pdf...`);
       logLine(`→ Generando print_deck_${sizeName}.pdf...`);
-      const printBytes = await buildPrintPDF(sizeName, resolvedCards, backBytes);
+      const printBytes = await buildPrintPDF(sizeName, cards, bytesMap, backBytes);
       logLine(`  ✓ print_deck_${sizeName}.pdf (${formatBytes(printBytes.length)})`, 'ok');
 
-      setProgress(baseProgress + 20 / formats.length, `Generando calibracion_${sizeName}.pdf...`);
+      setProgress(baseProgress + 15 / formats.length, `Generando calibracion_${sizeName}.pdf...`);
       logLine(`→ Generando calibracion_${sizeName}.pdf...`);
       const calBytes = await buildCalibrationPDF(sizeName);
       logLine(`  ✓ calibracion_${sizeName}.pdf (${formatBytes(calBytes.length)})`, 'ok');
@@ -1102,8 +1129,8 @@ async function generate() {
     setProgress(100, '✓ Listo — descarga tus PDFs abajo');
     logLine('✓ Todo generado correctamente.', 'ok');
 
-    /* ── STEP 6: Render results ── */
-    const totalPagePairs = chunkArray(resolvedCards, CARDS_PER_PAGE).length;
+    /* ── STEP 5: Render results ── */
+    const totalPagePairs = chunkArray(cards, CARDS_PER_PAGE).length;
     const statsRow = document.getElementById('stats-row');
     const statsData = [
       { val: resolvedCards.length, label: 'Cartas' },
